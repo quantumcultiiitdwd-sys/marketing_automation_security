@@ -1,0 +1,36 @@
+{
+  "name": "CampaignShield — error reporter",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__INGEST_URL__",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-CampaignShield-Key", "value": "={{ $env.CAMPAIGNSHIELD_INGEST_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ n8n: { id: $json.execution.id, workflowId: $json.workflow.id, workflowName: $json.workflow.name, status: 'error', mode: $json.execution.mode, retryOf: $json.execution.retryOf, stoppedAt: new Date().toISOString(), error: { message: $json.execution.error.message, node: $json.execution.lastNodeExecuted } } }) }}",
+        "options": { "timeout": 5000 }
+      },
+      "name": "Send to CampaignShield",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    }
+  ],
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Send to CampaignShield", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}

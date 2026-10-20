@@ -1,0 +1,52 @@
+name: Deploy
+
+# main → build & push images → staging → smoke → (manual approval) → production → smoke.
+# Configure GitHub environments "staging" and "production" (with required reviewers) and set per-environment:
+#   secrets.DEPLOY_HOOK_URL  — your platform's deploy hook (Render, Railway, Fly, Cloud Run via a small function, ...)
+#   vars.API_URL / vars.APP_URL — public URLs used by the smoke test
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs: { tag: "${{ steps.t.outputs.tag }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: |
+          repo=ghcr.io/${GITHUB_REPOSITORY,,}
+          docker build -t $repo/api:${{ steps.t.outputs.tag }} backend
+          docker build -t $repo/web:${{ steps.t.outputs.tag }} frontend
+          docker push $repo/api:${{ steps.t.outputs.tag }}
+          docker push $repo/web:${{ steps.t.outputs.tag }}
+
+  staging:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_URL }}?tag=${{ needs.publish.outputs.tag }}"
+      - run: sleep 60 && ./scripts/smoke.sh "${{ vars.API_URL }}" "${{ vars.APP_URL }}"
+
+  production:
+    needs: [publish, staging]
+    runs-on: ubuntu-latest
+    environment: production   # required reviewers = manual approval gate
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_URL }}?tag=${{ needs.publish.outputs.tag }}"
+      - run: sleep 60 && ./scripts/smoke.sh "${{ vars.API_URL }}" "${{ vars.APP_URL }}"

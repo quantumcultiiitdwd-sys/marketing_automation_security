@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 170
+target-version = "py312"
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "S"]
+ignore = ["S101", "S105", "S106", "B008", "B904", "E731", "S608"]  # S608: only GAQL with server-generated dates; SQL goes through the ORM
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B"]
+
+[tool.coverage.run]
+source = ["app"]

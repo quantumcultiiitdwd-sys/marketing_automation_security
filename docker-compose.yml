@@ -1,0 +1,69 @@
+# Local / single-host deployment. Production: same images on a managed container platform with managed Postgres.
+name: campaignshield
+
+x-api-env: &api-env
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql+psycopg://campaignshield:${POSTGRES_PASSWORD:-campaignshield}@db:5432/campaignshield
+  SECRET_KEY: ${SECRET_KEY:-dev-insecure-secret-change-me-0123456789abcdef}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+  PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+  PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
+  CORS_ORIGINS: ${PUBLIC_APP_URL:-http://localhost:3000}
+  DEMO_ENABLED: ${DEMO_ENABLED:-true}
+  MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-300}
+  ALLOW_PRIVATE_INTEGRATION_HOSTS: ${ALLOW_PRIVATE_INTEGRATION_HOSTS:-true}
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+  GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: campaignshield
+      POSTGRES_USER: campaignshield
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-campaignshield}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaignshield"]
+      interval: 5s
+      retries: 10
+
+  migrate:
+    build: ./backend
+    command: ["alembic", "upgrade", "head"]
+    environment: *api-env
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: ./backend
+    environment: *api-env
+    ports: ["8000:8000"]
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    environment: *api-env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; from app.config import settings; from app.worker import HEARTBEAT; sys.exit(time.time() - os.path.getmtime(HEARTBEAT) > 3 * settings.monitor_interval_seconds)"]
+      interval: 60s
+      start_period: 120s
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    build: ./frontend
+    environment:
+      API_URL: http://api:8000
+    ports: ["3000:3000"]
+    restart: unless-stopped
+    depends_on: [api]
+
+volumes:
+  pgdata:
