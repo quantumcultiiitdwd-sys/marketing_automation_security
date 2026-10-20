@@ -10,6 +10,21 @@
 | Provider health | Integrations page; `integration_health` incidents after 3 consecutive failures (or 1 auth failure) |
 | Audit integrity | `GET /v1/audit/verify` — alert if `valid: false` |
 
+## Cloudflare edge protection
+
+The app runs on any container platform. Putting both public hostnames behind Cloudflare (proxied DNS) adds what the app can't do alone. Configure these in the dashboard, or ask Claude Code with the Cloudflare plugin once its MCP server is authenticated (`/mcp`).
+
+| Control | Setting |
+|---|---|
+| **Turnstile** (in app) | Create a Managed widget for the app hostname, then set `TURNSTILE_SITEKEY`, `TURNSTILE_SECRET` and `TURNSTILE_HOSTNAMES` on the API. Sign-in and sign-up then require a valid token, and verification fails closed. Production refuses to start with test keys or `localhost`. |
+| **WAF managed rules** | Turn on the Cloudflare Managed Ruleset and the OWASP Core Ruleset. Run in *Log* for a week, then switch to *Block*. |
+| **Rate limiting** (per IP) | `http.request.method eq "POST" and http.request.uri.path in {"/api/auth/login" "/api/auth/register" "/v1/auth/login" "/v1/auth/register"}`: 10 requests/min, then block 10 min. `http.request.uri.path eq "/v1/events"`: 600 requests/min, then block 1 min. The app's own limits are per email/org and per replica. |
+| **Origin lock** | Accept traffic only from Cloudflare (Cloudflare Tunnel, or Authenticated Origin Pulls plus a firewall allowlist). Without this, attackers can skip the WAF by calling the origin directly. |
+| **Cloudflare Access** | Put Zero Trust Access in front of staging and the API's `/docs` and `/openapi.json`. Don't put it in front of `/v1/events` or `/v1/actions/execute`, because n8n and agents authenticate with keys. |
+| **TLS** | Use SSL mode *Full (strict)*, and turn on "Always Use HTTPS". The web app already sends HSTS and a CSP. |
+
+The app doesn't use client IPs, so `--forwarded-allow-ips "*"` is harmless. If you add IP-based logic, read `CF-Connecting-IP` only from requests that come through the locked origin.
+
 ## Release rollback
 
 1. Re-deploy the previous image tag (deploy hook with `?tag=<previous>`).

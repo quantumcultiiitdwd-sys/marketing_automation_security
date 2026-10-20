@@ -34,7 +34,7 @@ def check(name, ok, detail=""):
 
 def tenant(org):
     s, d = call("POST", "/auth/register", {"email": f"e2e-{uuid.uuid4().hex[:8]}@example.com", "password": "correct-horse-1",
-                                           "organization_name": org})
+                                           "organization_name": org, "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"})  # Turnstile test-key token; ignored when Turnstile is off
     check(f"register {org}", s == 201, d)
     return {"Authorization": f"Bearer {d['token']}", "X-Org-Id": d["organizations"][0]["id"]}
 

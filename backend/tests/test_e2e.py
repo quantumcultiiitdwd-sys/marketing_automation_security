@@ -287,3 +287,35 @@ def test_error_format_and_health(client):
     assert client.get("/v1/health").json()["status"] == "ok"
     assert client.get("/v1/ready").json()["status"] == "ready"
     assert "/v1/actions/execute" in client.get("/openapi.json").json()["paths"]
+
+
+def test_turnstile_gates_auth_and_fails_closed(client, monkeypatch):
+    import httpx
+
+    from app import security
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "turnstile_secret", "s")
+    monkeypatch.setattr(settings, "turnstile_sitekey", "k")
+    monkeypatch.setattr(settings, "turnstile_hostnames", {"app.example.com"})
+    reply = {}
+
+    def fake_post(url, **kw):
+        if reply.get("raise"):
+            raise httpx.ConnectError("down")
+        return httpx.Response(200, json=reply, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(security.httpx, "post", fake_post)
+    body = {"email": "bot@example.com", "password": "correct-horse-1", "organization_name": "X"}
+    assert client.get("/v1/auth/config").json() == {"turnstile_sitekey": "k"}
+    assert client.post("/v1/auth/register", json=body).status_code == 403  # no token
+    for bad in ({"success": False}, {"success": True, "action": "signup", "hostname": "evil.example"},
+                {"success": True, "action": "login", "hostname": "app.example.com"}, {"raise": True}):
+        reply.clear(), reply.update(bad)
+        email = f"bot{len(str(bad))}@example.com"
+        assert client.post("/v1/auth/register", json={**body, "email": email, "turnstile_token": "t"}).status_code == 403, bad
+    reply.clear(), reply.update({"success": True, "action": "signup", "hostname": "app.example.com"})
+    assert client.post("/v1/auth/register", json={**body, "turnstile_token": "t"}).status_code == 201
+    assert client.post("/v1/auth/login", json={"email": body["email"], "password": body["password"]}).status_code == 403
+    reply["action"] = "login"
+    assert client.post("/v1/auth/login", json={"email": body["email"], "password": body["password"], "turnstile_token": "t"}).status_code == 200

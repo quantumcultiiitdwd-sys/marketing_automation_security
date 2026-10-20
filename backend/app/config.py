@@ -24,6 +24,10 @@ class Settings:
     google_ads_developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", "")
     google_ads_api_version = os.getenv("GOOGLE_ADS_API_VERSION", "v21")
     sentry_dsn = os.getenv("SENTRY_DSN", "")
+    # Cloudflare Turnstile on sign-in/sign-up. Enabled when the secret is set.
+    turnstile_sitekey = os.getenv("TURNSTILE_SITEKEY", "")
+    turnstile_secret = os.getenv("TURNSTILE_SECRET", "")
+    turnstile_hostnames = {h.strip() for h in os.getenv("TURNSTILE_HOSTNAMES", "").split(",") if h.strip()}
 
     def validate(self):
         if self.env == "production":
@@ -32,6 +36,11 @@ class Settings:
                 raise RuntimeError(f"Missing required production secrets: {', '.join(missing)}")
             if self.database_url.startswith("sqlite"):
                 raise RuntimeError("Production requires PostgreSQL (DATABASE_URL)")
+            if self.turnstile_secret:
+                if not self.turnstile_sitekey or not self.turnstile_hostnames:
+                    raise RuntimeError("TURNSTILE_SECRET requires TURNSTILE_SITEKEY and TURNSTILE_HOSTNAMES")
+                if self.turnstile_hostnames & {"localhost", "127.0.0.1"} or self.turnstile_secret[:2] in ("1x", "2x", "3x"):
+                    raise RuntimeError("Production Turnstile must not use localhost hostnames or Cloudflare test keys")
 
 
 settings = Settings()

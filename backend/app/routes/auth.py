@@ -9,7 +9,7 @@ from ..core import audit
 from ..db import get_db, utcnow
 from ..deps import ROLES, Ctx, current_user, get_ctx, rate_limit, require
 from ..models import Membership, Organization, Session, User, to_dict
-from ..security import create_token, hash_password, verify_password
+from ..security import create_token, hash_password, verify_password, verify_turnstile
 
 router = APIRouter(prefix="/v1", tags=["auth & organizations"])
 
@@ -19,11 +19,24 @@ class Register(BaseModel):
     password: str = Field(min_length=10, max_length=200)
     name: str = Field("", max_length=200)
     organization_name: str = Field(min_length=1, max_length=200)
+    turnstile_token: str | None = None
 
 
 class Login(BaseModel):
     email: EmailStr
     password: str = Field(max_length=200)
+    turnstile_token: str | None = None
+
+
+def _human(token: str | None, action: str):
+    if settings.turnstile_secret and not verify_turnstile(token, action):
+        raise HTTPException(403, "Human verification failed. Please try again.")
+
+
+@router.get("/auth/config")
+def auth_config():
+    """Public: what the sign-in page needs to render (Turnstile sitekey, if enabled)."""
+    return {"turnstile_sitekey": settings.turnstile_sitekey if settings.turnstile_secret else None}
 
 
 def _session(db, user: User) -> dict:
@@ -42,6 +55,7 @@ def _orgs(db, user: User) -> list[dict]:
 @router.post("/auth/register", status_code=201)
 def register(body: Register, db=Depends(get_db)):
     rate_limit(f"register:{body.email.lower()}", 5)
+    _human(body.turnstile_token, "signup")
     if db.scalar(select(User.id).where(User.email == body.email.lower())):
         raise HTTPException(409, "An account with this email already exists")
     user = User(email=body.email.lower(), name=body.name, password_hash=hash_password(body.password))
@@ -56,6 +70,7 @@ def register(body: Register, db=Depends(get_db)):
 @router.post("/auth/login")
 def login(body: Login, db=Depends(get_db)):
     rate_limit(f"login:{body.email.lower()}", 10)
+    _human(body.turnstile_token, "login")
     user = db.scalar(select(User).where(User.email == body.email.lower()))
     if not user or not verify_password(body.password, user.password_hash) or user.status != "active":
         raise HTTPException(401, "Invalid email or password")

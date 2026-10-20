@@ -27,7 +27,7 @@ cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev
 .venv/bin/alembic upgrade head            # SQLite by default; set DATABASE_URL for Postgres
 .venv/bin/uvicorn app.main:app --reload   # :8000
 .venv/bin/python -m app.worker            # scheduler: health, sync, heartbeats, retention
-.venv/bin/pytest                          # 33 tests (set TEST_DATABASE_URL to run against Postgres)
+.venv/bin/pytest                          # 34 tests (set TEST_DATABASE_URL to run against Postgres)
 
 # Web
 cd frontend && npm install && npm run dev # :3000, proxies /api → API_URL (default http://localhost:8000)
@@ -86,7 +86,8 @@ Rollback and operations: see [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
 - The policy engine fails closed. Unknown actions, unpermitted agents, policy errors and currency mismatches are all **DENY**. LLM output never feeds the decision.
 - Idempotency is a database unique constraint, so concurrent retries execute once. Timeouts become `unknown` and are reconciled, never blindly re-run. Approvals use an atomic `pending→approved` transition and re-check state, so stale approvals are rejected.
 - The audit log is append-only and hash-chained (`GET /v1/audit/verify`). Secrets and email addresses are redacted or pseudonymised before storage.
-- There is an SSRF guard on user-supplied URLs (private and metadata IPs are blocked in production), plus payload limits, rate limits and security headers.
+- There is an SSRF guard on user-supplied URLs (private and metadata IPs are blocked in production), plus payload limits, rate limits, a strict CSP and HSTS.
+- Optional Cloudflare Turnstile protects sign-in and sign-up (`TURNSTILE_*` in `.env.example`; verification fails closed). For WAF, edge rate limiting, origin lock and Access, see [docs/RUNBOOKS.md](docs/RUNBOOKS.md#cloudflare-edge-protection).
 
 ## Deliberate MVP simplifications
 

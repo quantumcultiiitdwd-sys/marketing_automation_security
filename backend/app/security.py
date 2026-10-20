@@ -9,6 +9,7 @@ import time
 from datetime import timedelta
 from urllib.parse import urlparse
 
+import httpx
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -119,3 +120,19 @@ def redact(value, depth: int = 0):
     if isinstance(value, str):
         return _EMAIL.sub(lambda m: f"user-{sha256(m.group(0).lower())[:10]}@{m.group(2)}", value)
     return value
+
+
+def verify_turnstile(token: str | None, action: str) -> bool:
+    """Cloudflare Turnstile siteverify. Fails closed on any error, wrong action or unexpected hostname."""
+    if not token or len(token) > 2048 or not settings.turnstile_hostnames:
+        return False
+    try:
+        r = httpx.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", timeout=10,
+                       data={"secret": settings.turnstile_secret, "response": token})
+        r.raise_for_status()
+        result = r.json()
+    except (httpx.HTTPError, ValueError):
+        return False
+    # Cloudflare test keys return no action; production refuses test keys at startup (config.validate).
+    action_ok = result.get("action") == action or (result.get("metadata") or {}).get("result_with_testing_key") is True
+    return result.get("success") is True and action_ok and result.get("hostname") in settings.turnstile_hostnames
