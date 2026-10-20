@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t campaignshield-api:ci backend && docker build -t campaignshield-web:ci frontend
       - name: Scan images
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with: { image-ref: "campaignshield-api:ci", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1" }
       - name: End-to-end smoke (compose)
         run: |

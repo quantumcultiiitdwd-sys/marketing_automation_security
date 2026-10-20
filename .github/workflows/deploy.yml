@@ -4,6 +4,7 @@ name: Deploy
 # Configure GitHub environments "staging" and "production" (with required reviewers) and set per-environment:
 #   secrets.DEPLOY_HOOK_URL  — your platform's deploy hook (Render, Railway, Fly, Cloud Run via a small function, ...)
 #   vars.API_URL / vars.APP_URL — public URLs used by the smoke test
+# Then set the repository variable DEPLOY_ENABLED=true. Until then only the images are published.
 on:
   workflow_run:
     workflows: [CI]
@@ -20,10 +21,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs: { tag: "${{ steps.t.outputs.tag }}" }
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}  # the commit CI tested, not whatever main is now
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ env.SHA }}" }
       - id: t
-        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=${SHA::12}" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
       - run: |
@@ -35,10 +39,12 @@ jobs:
 
   staging:
     needs: publish
+    if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: staging
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ github.event.workflow_run.head_sha || github.sha }}" }
       - run: curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_URL }}?tag=${{ needs.publish.outputs.tag }}"
       - run: sleep 60 && ./scripts/smoke.sh "${{ vars.API_URL }}" "${{ vars.APP_URL }}"
 
@@ -48,5 +54,6 @@ jobs:
     environment: production   # required reviewers = manual approval gate
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ github.event.workflow_run.head_sha || github.sha }}" }
       - run: curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_URL }}?tag=${{ needs.publish.outputs.tag }}"
       - run: sleep 60 && ./scripts/smoke.sh "${{ vars.API_URL }}" "${{ vars.APP_URL }}"
